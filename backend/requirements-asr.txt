@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+python-multipart
+transformers
+torch
+torchaudio
+librosa
+soundfile
+numpy
+noisereduce

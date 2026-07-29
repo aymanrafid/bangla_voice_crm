@@ -1,0 +1,40 @@
+databases:
+  - name: bangla-voice-crm-db
+    databaseName: bangla_voice_crm
+    user: bangla_voice_crm_user
+    plan: free
+
+services:
+  - type: web
+    name: bangla-voice-crm-api
+    runtime: python
+    plan: free
+    buildCommand: pip install -r backend/requirements-crm.txt
+    startCommand: python -m uvicorn backend.crm_server:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: CRM_ENV
+        value: production
+      - key: CRM_DATABASE_URL
+        fromDatabase:
+          name: bangla-voice-crm-db
+          property: connectionString
+      - key: CRM_JWT_SECRET
+        generateValue: true
+      - key: CRM_BOOTSTRAP_COMPANY_NAME
+        value: Platform Default Company
+      - key: CRM_BOOTSTRAP_COMPANY_SLUG
+        value: platform-default
+      - key: CRM_BOOTSTRAP_ADMIN_USERNAME
+        value: admin
+      - key: CRM_BOOTSTRAP_ADMIN_PASSWORD
+        sync: false
+      - key: CRM_BOOTSTRAP_ADMIN_FULL_NAME
+        value: System Admin
+      - key: CRM_BOOTSTRAP_ADMIN_ROLE
+        value: SuperAdmin
+      - key: CRM_PUBLIC_BASE_URL
+        sync: false
+      - key: CRM_EXPOSE_RESET_TOKENS
+        value: false
