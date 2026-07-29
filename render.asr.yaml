@@ -1,0 +1,44 @@
+services:
+  - type: web
+    name: bangla-voice-asr-api
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r backend/requirements-asr.txt
+    startCommand: python -m uvicorn backend.asr_server:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /model-info
+    autoDeploy: true
+    envVars:
+      - key: BANGLA_ASR_MODEL_ID
+        value: bangla-speech-processing/BanglaASR
+      - key: BANGLA_ASR_DEVICE
+        value: cpu
+      - key: BANGLA_ASR_MIN_SECONDS
+        value: 1.8
+      - key: BANGLA_ASR_RETURN_TIMINGS
+        value: true
+      - key: BANGLA_ASR_CPU_CHUNK_SECONDS
+        value: 8
+      - key: BANGLA_ASR_CPU_BATCH_SIZE
+        value: 1
+      - key: BANGLA_ASR_CPU_THREADS
+        value: 4
+      - key: BANGLA_ASR_NOISE_REDUCTION
+        value: auto
+      - key: BANGLA_ASR_JOB_WORKERS
+        value: 1
+      - key: BANGLA_ASR_JOB_RETENTION_MINUTES
+        value: 180
+      - key: BANGLA_ASR_CPU_SEGMENT_SECONDS
+        value: 12
+      - key: BANGLA_ASR_SEGMENT_MIN_SECONDS
+        value: 2.0
+      - key: BANGLA_ASR_SEGMENT_PAD_SECONDS
+        value: 0.15
+      - key: BANGLA_ASR_SEGMENT_SPLIT_TOP_DB
+        value: 25
+      - key: BANGLA_ASR_MAX_AUDIO_MB
+        value: 50
+      - key: BANGLA_ASR_MAX_SYNC_SECONDS
+        value: 45
+      - key: HF_TOKEN
+        sync: false
