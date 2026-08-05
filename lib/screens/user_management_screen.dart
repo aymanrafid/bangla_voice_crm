@@ -161,12 +161,27 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                         if (isSuperAdmin) ...[
                           DropdownButtonFormField<String>(
                             initialValue: _selectedCompanyExternalId,
+                            isExpanded: true,
                             items: _companies
                                 .map(
                                   (company) => DropdownMenuItem(
                                     value: company.externalId,
                                     child: Text(
                                       '${company.name} (${company.slug})',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                )
+                                .toList(),
+                            selectedItemBuilder: (context) => _companies
+                                .map(
+                                  (company) => Align(
+                                    alignment: Alignment.centerLeft,
+                                    child: Text(
+                                      '${company.name} (${company.slug})',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
                                     ),
                                   ),
                                 )
@@ -179,6 +194,7 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                               labelText: 'Target Company',
                               helperText:
                                   'Super Admin can create users for any company workspace.',
+                              helperMaxLines: 2,
                             ),
                           ),
                           const SizedBox(height: 12),

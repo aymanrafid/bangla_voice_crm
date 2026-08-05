@@ -1,4 +1,5 @@
 import os
+import re
 import threading
 import time
 import uuid
@@ -420,7 +421,7 @@ def _transcribe_audio_file(audio_path: str, *, job_id: str | None = None) -> Tra
             completed_chunks=index,
         )
 
-    transcript = _normalize_text(' '.join(texts))
+    transcript = _merge_chunk_texts(texts)
     elapsed_ms = (time.perf_counter() - started_at) * 1000
     debug = (
         f'model={MODEL_ID}; '
@@ -517,8 +518,105 @@ def _fixed_chunks(samples: np.ndarray, max_len: int) -> list[np.ndarray]:
     ]
 
 
+_NUMBER_WORDS = {
+    '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
+    'zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine',
+    '?????', '????', '??', '???', '???', '???', '????', '??', '???', '???', '??', '??', '???',
+    '?', '?', '?', '?', '?', '?', '?', '?', '?', '?',
+}
+
+
+def _merge_chunk_texts(texts: list[str]) -> str:
+    merged_tokens: list[str] = []
+    for text in texts:
+        incoming = _normalize_text(text).split()
+        if not incoming:
+            continue
+        if not merged_tokens:
+            merged_tokens.extend(incoming)
+            continue
+
+        overlap = 0
+        max_overlap = min(8, len(merged_tokens), len(incoming))
+        for size in range(max_overlap, 0, -1):
+            if merged_tokens[-size:] == incoming[:size]:
+                overlap = size
+                break
+        merged_tokens.extend(incoming[overlap:])
+
+    return _normalize_text(' '.join(merged_tokens))
+
+
 def _normalize_text(text: str) -> str:
-    return ' '.join(text.replace('\n', ' ').split()).strip()
+    normalized = ' '.join(text.replace('\n', ' ').split()).strip()
+    if not normalized:
+        return ''
+
+    tokens = normalized.split()
+    tokens = _collapse_repeated_tokens(tokens)
+    tokens = _collapse_repeated_phrases(tokens)
+    tokens = _collapse_repeated_tokens(tokens)
+    return ' '.join(tokens).strip()
+
+
+def _collapse_repeated_tokens(tokens: list[str], *, max_repeats: int = 2) -> list[str]:
+    collapsed: list[str] = []
+    previous = None
+    repeat_count = 0
+
+    for token in tokens:
+        lowered = token.lower()
+        if lowered == previous and not _is_sensitive_token(lowered):
+            repeat_count += 1
+            if repeat_count <= max_repeats:
+                collapsed.append(token)
+            continue
+
+        previous = lowered
+        repeat_count = 1
+        collapsed.append(token)
+
+    return collapsed
+
+
+def _collapse_repeated_phrases(tokens: list[str]) -> list[str]:
+    if len(tokens) < 4:
+        return tokens
+
+    collapsed: list[str] = []
+    index = 0
+    while index < len(tokens):
+        matched = False
+        max_size = min(5, (len(tokens) - index) // 2)
+        for size in range(max_size, 1, -1):
+            phrase = tokens[index:index + size]
+            lowered = [item.lower() for item in phrase]
+            if any(_is_sensitive_token(item) for item in lowered):
+                continue
+
+            repeats = 1
+            while index + ((repeats + 1) * size) <= len(tokens):
+                candidate = tokens[index + repeats * size:index + (repeats + 1) * size]
+                if [item.lower() for item in candidate] != lowered:
+                    break
+                repeats += 1
+
+            if repeats >= 2:
+                collapsed.extend(phrase)
+                index += repeats * size
+                matched = True
+                break
+
+        if not matched:
+            collapsed.append(tokens[index])
+            index += 1
+
+    return collapsed
+
+
+def _is_sensitive_token(token: str) -> bool:
+    lowered = token.lower()
+    return lowered in _NUMBER_WORDS or bool(re.fullmatch(r'[0-9?-?]+', lowered))
 
 
 def _save_upload_to_temp(audio: UploadFile) -> str:

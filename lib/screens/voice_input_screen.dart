@@ -134,9 +134,16 @@ class _VoiceInputScreenState extends State<VoiceInputScreen> {
   }
 
   Future<void> _processAudio(String audioPath) async {
+    _transcriptCtrl.clear();
+    _nameCtrl.clear();
+    _phoneCtrl.clear();
+    _addressCtrl.clear();
+    _locationCtrl.clear();
+    _productCtrl.clear();
     setState(() {
       _isProcessing = true;
       _errorMsg = '';
+      _recordingPath = audioPath;
       _processingMessage = 'Uploading audio to ASR server...';
       _processingProgress = 2;
       _processingChunkCount = 0;
@@ -231,6 +238,11 @@ class _VoiceInputScreenState extends State<VoiceInputScreen> {
       _extractedFields = fields;
       _intelligence = intelligence;
       _confidence = confidence;
+      _nameCtrl.text = fields.name;
+      _phoneCtrl.text = fields.phone;
+      _addressCtrl.text = fields.address;
+      _locationCtrl.text = fields.location;
+      _productCtrl.text = fields.productInterest;
       _isProcessing = false;
       _errorMsg = '';
       _processingMessage = 'Transcript ready.';

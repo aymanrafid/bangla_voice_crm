@@ -145,8 +145,10 @@ class LeadVoiceUpdateService {
   }
 
   static List<String> _splitClauses(String transcript) {
-    return transcript
-        .split(RegExp(r'[।\n,;]+| এবং '))
+    final prepared = transcript.replaceAll('?', '\n').replaceAll(' ??? ', '\n');
+
+    return prepared
+        .split(RegExp(r'[\n;]+'))
         .map((clause) => clause.trim())
         .where((clause) => clause.isNotEmpty)
         .toList();
