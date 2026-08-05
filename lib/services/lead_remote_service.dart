@@ -39,6 +39,11 @@ class LeadRemoteService {
         assignedEmployeeExternalId: employee.externalId,
         assignedEmployeeName: employee.fullName,
       ),
+    ).then(
+      (updatedLead) => updatedLead.copyWith(
+        assignedEmployeeExternalId: employee.externalId,
+        assignedEmployeeName: employee.fullName,
+      ),
     );
   }
 
@@ -101,6 +106,7 @@ class LeadRemoteService {
       leadScore: map['lead_score'] ?? 50,
       aiSummary: map['ai_summary'] ?? '',
       nextAction: map['next_action'] ?? '',
+      assignedEmployeeName: map['assigned_user_name'] ?? '',
       assignedEmployeeExternalId:
           map['assigned_user_external_id']?.toString() ?? '',
       version: map['version'] ?? 1,

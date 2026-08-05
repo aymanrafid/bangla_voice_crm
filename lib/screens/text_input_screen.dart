@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import '../models/lead.dart';
+import '../services/auth_service.dart';
 import '../services/crm_extractor.dart';
 import '../services/database_service.dart';
 import '../services/lead_intelligence_service.dart';
+import '../services/lead_remote_service.dart';
 import '../theme.dart';
 import '../widgets/field_card.dart';
 import 'lead_detail_screen.dart';
@@ -18,6 +21,7 @@ class TextInputScreen extends StatefulWidget {
 class _TextInputScreenState extends State<TextInputScreen> {
   final _textCtrl = TextEditingController();
   final _db = DatabaseService();
+  final _remote = LeadRemoteService();
   String _leadType = 'Auto Detect';
   CrmFields? _fields;
   LeadIntelligence? _intelligence;
@@ -69,6 +73,8 @@ class _TextInputScreenState extends State<TextInputScreen> {
     if (_fields == null || _isSaving) return;
 
     setState(() => _isSaving = true);
+    final auth = context.read<AuthService>();
+    final navigator = Navigator.of(context);
     try {
       final leadId = await _db.generateLeadId();
       final lead = Lead(
@@ -88,12 +94,12 @@ class _TextInputScreenState extends State<TextInputScreen> {
         lead: lead,
         fields: _fields!,
       );
-      final id = await _db.insertLead(enrichedLead);
-      final savedLead = enrichedLead.copyWith(id: id);
+      final savedLead = auth.isRemoteMode && await _remote.isConfigured()
+          ? await _remote.createLead(enrichedLead)
+          : enrichedLead.copyWith(id: await _db.insertLead(enrichedLead));
 
       if (!mounted) return;
-      await Navigator.push(
-        context,
+      await navigator.push(
         MaterialPageRoute(builder: (_) => LeadDetailScreen(lead: savedLead)),
       );
 

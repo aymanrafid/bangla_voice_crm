@@ -58,6 +58,39 @@ def _get_scoped_user_by_external_id(db: Session, current_user: User, external_id
     return user
 
 
+def _serialize_lead(db: Session, lead: Lead) -> dict:
+    assigned_user_name = ''
+    if lead.assigned_user_external_id:
+        assigned_user = db.query(User).filter(User.external_id == lead.assigned_user_external_id).first()
+        if assigned_user is not None:
+            assigned_user_name = assigned_user.full_name
+    return {
+        'external_id': lead.external_id,
+        'lead_type': lead.lead_type,
+        'name': lead.name,
+        'phone': lead.phone,
+        'address': lead.address,
+        'location': lead.location,
+        'product_interest': lead.product_interest,
+        'transcript': lead.transcript,
+        'status': lead.status,
+        'confidence': lead.confidence,
+        'intent': lead.intent,
+        'sentiment': lead.sentiment,
+        'priority': lead.priority,
+        'lead_score': lead.lead_score,
+        'ai_summary': lead.ai_summary,
+        'next_action': lead.next_action,
+        'assigned_user_external_id': lead.assigned_user_external_id,
+        'assigned_user_name': assigned_user_name,
+        'client_updated_at': None,
+        'version': lead.version,
+        'created_at': lead.created_at,
+        'updated_at': lead.updated_at,
+        'deleted_at': lead.deleted_at,
+    }
+
+
 def _resolve_user_company(db: Session, current_user: User, company_external_id: str | None) -> Company:
     if not _is_super_admin(current_user):
         if current_user.company is None:
@@ -302,7 +335,7 @@ def create_lead(payload: LeadCreate, db: Session = Depends(get_db), current_user
     _log_action(db, action='create_lead', entity_type='lead', entity_external_id=lead.external_id, details=f'Lead created for {lead.name or lead.phone}.', actor=current_user, company_id=lead.company_id)
     db.commit()
     db.refresh(lead)
-    return lead
+    return _serialize_lead(db, lead)
 
 
 @app.get('/leads', response_model=list[LeadRead])
@@ -318,7 +351,8 @@ def list_leads(assigned_user_external_id: str | None = None, db: Session = Depen
     elif assigned_user_external_id:
         _get_scoped_user_by_external_id(db, current_user, assigned_user_external_id)
         query = query.filter(Lead.assigned_user_external_id == assigned_user_external_id)
-    return query.order_by(Lead.updated_at.desc()).all()
+    leads = query.order_by(Lead.updated_at.desc()).all()
+    return [_serialize_lead(db, lead) for lead in leads]
 
 
 @app.put('/leads/{external_id}', response_model=LeadRead)
@@ -343,7 +377,7 @@ def update_lead(external_id: str, payload: LeadUpdate, db: Session = Depends(get
     _log_action(db, action='update_lead', entity_type='lead', entity_external_id=lead.external_id, details=f'Lead updated to version {lead.version}.', actor=current_user, company_id=lead.company_id)
     db.commit()
     db.refresh(lead)
-    return lead
+    return _serialize_lead(db, lead)
 
 
 @app.post('/field-tracking', response_model=TrackingEventRead)
