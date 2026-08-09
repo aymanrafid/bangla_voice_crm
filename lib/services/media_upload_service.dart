@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -6,6 +7,10 @@ import 'package:http/http.dart' as http;
 import 'api_config_service.dart';
 
 class MediaUploadService {
+  // Uploads carry a file body and may also hit a cold Render instance, so this
+  // is more generous than the plain JSON calls in CrmApiClient.
+  static const Duration _uploadTimeout = Duration(seconds: 90);
+
   final ApiConfigService _config = ApiConfigService();
 
   Future<bool> isConfigured() async {
@@ -39,11 +44,38 @@ class MediaUploadService {
     request.fields['related_external_id'] = relatedExternalId;
     request.files.add(await http.MultipartFile.fromPath('file', filePath));
 
-    final response = await http.Response.fromStream(await request.send());
-    final data = jsonDecode(response.body) as Map<String, dynamic>;
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw Exception(data['detail']?.toString() ?? 'Media upload failed.');
+    late final http.Response response;
+    try {
+      final streamed = await request.send().timeout(_uploadTimeout);
+      response =
+          await http.Response.fromStream(streamed).timeout(_uploadTimeout);
+    } on TimeoutException {
+      throw Exception(
+        'Media upload timed out. The server may be waking up — '
+        'the file stays queued, please retry.',
+      );
     }
+
+    // Decode after the status check: a booting Render instance answers with an
+    // HTML error page, which would otherwise blow up as a FormatException and
+    // hide the real failure.
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      final failure = _tryDecodeJson(response.body);
+      throw Exception(
+        failure?['detail']?.toString() ??
+            'Media upload failed (${response.statusCode}).',
+      );
+    }
+    final data = _tryDecodeJson(response.body) ?? const <String, dynamic>{};
     return data['public_url']?.toString() ?? data['url']?.toString() ?? '';
+  }
+
+  Map<String, dynamic>? _tryDecodeJson(String body) {
+    if (body.trim().isEmpty) return null;
+    try {
+      return jsonDecode(body) as Map<String, dynamic>;
+    } catch (_) {
+      return null;
+    }
   }
 }
