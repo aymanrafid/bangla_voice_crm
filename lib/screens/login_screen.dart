@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -20,6 +22,8 @@ class _LoginScreenState extends State<LoginScreen> {
   final _companySlugController = TextEditingController();
   String _crmUrl = '';
   String _asrUrl = '';
+  bool _showWakingUp = false;
+  Timer? _wakingUpTimer;
 
   @override
   void initState() {
@@ -41,6 +45,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   void dispose() {
+    _wakingUpTimer?.cancel();
     _usernameController.dispose();
     _passwordController.dispose();
     _companySlugController.dispose();
@@ -50,14 +55,27 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> _login() async {
     final auth = context.read<AuthService>();
     await _config.saveCompanySlug(_companySlugController.text.trim());
+
+    // After 5 s, show "server waking up" hint (Render cold start)
+    _wakingUpTimer = Timer(const Duration(seconds: 5), () {
+      if (mounted) setState(() => _showWakingUp = true);
+    });
+
     final ok = await auth.login(
       username: _usernameController.text,
       password: _passwordController.text,
       companySlug: _companySlugController.text,
     );
+
+    _wakingUpTimer?.cancel();
+    if (mounted) setState(() => _showWakingUp = false);
+
     if (!ok && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(auth.error)),
+        SnackBar(
+          content: Text(auth.error),
+          duration: const Duration(seconds: 6),
+        ),
       );
     }
   }
@@ -95,6 +113,41 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                         ],
                       ),
+                      if (_showWakingUp) ...[
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: Colors.orange.shade50,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: Colors.orange.shade200),
+                          ),
+                          child: Row(
+                            children: [
+                              SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.orange.shade700,
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  'Server is waking up… This may take up to 60 seconds on the free Render plan.',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.orange.shade900,
+                                    height: 1.4,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                      ],
                       const Icon(
                         Icons.mic_rounded,
                         size: 54,

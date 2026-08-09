@@ -17,7 +17,10 @@ class RemoteAuthSession {
 }
 
 class RemoteAuthService {
-  static const Duration _requestTimeout = Duration(seconds: 15);
+  // Render free tier can take 30–60 s to wake from cold start.
+  // Login gets a longer timeout; all other requests use the standard one.
+  static const Duration _loginTimeout = Duration(seconds: 60);
+  static const Duration _requestTimeout = Duration(seconds: 20);
 
   Uri _uri(String baseUrl, String path) =>
       Uri.parse('${baseUrl.replaceAll(RegExp(r'/$'), '')}$path');
@@ -41,10 +44,11 @@ class RemoteAuthService {
                 'company_slug': companySlug.trim(),
             }),
           )
-          .timeout(_requestTimeout);
+          .timeout(_loginTimeout);
     } on TimeoutException {
       throw Exception(
-        'CRM login timed out. Check that the server URL is correct and reachable.',
+        'Server is waking up — please wait a moment and try again. '
+        '(Render free tier goes to sleep after inactivity.)',
       );
     }
 
