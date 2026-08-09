@@ -18,7 +18,7 @@ from .schemas import AuditLogRead, CompanyCreateRequest, CompanyProvisionRespons
 from .security import create_access_token, create_reset_token, hash_password, verify_password
 
 app = FastAPI(title=settings.app_name)
-app.add_middleware(CORSMiddleware, allow_origins=['*'], allow_credentials=True, allow_methods=['*'], allow_headers=['*'])
+app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, allow_credentials=settings.cors_allow_credentials and settings.cors_origins != ['*'], allow_methods=['*'], allow_headers=['*'])
 UPLOAD_ROOT = Path(__file__).resolve().parent / 'uploads'
 UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
 app.mount('/media-files', StaticFiles(directory=str(UPLOAD_ROOT)), name='media-files')
@@ -301,7 +301,7 @@ def request_password_reset(payload: PasswordResetRequest, db: Session = Depends(
     _log_action(db, action='request_password_reset', entity_type='user', entity_external_id=user.external_id, details='Password reset requested.', actor=None, company_id=user.company_id)
     db.commit()
     response = {'message': 'Password reset token created.'}
-    if settings.expose_reset_tokens:
+    if settings.effective_expose_reset_tokens:
         response['reset_token'] = token_value
     return response
 

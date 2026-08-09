@@ -26,7 +26,11 @@ class Settings:
     )
     public_base_url: str = os.getenv("CRM_PUBLIC_BASE_URL", "https://api.example.com")
     expose_reset_tokens: bool = (
-        os.getenv("CRM_EXPOSE_RESET_TOKENS", "true").lower() == "true"
+        os.getenv("CRM_EXPOSE_RESET_TOKENS", "false").lower() == "true"
+    )
+    cors_origins_raw: str = os.getenv("CRM_CORS_ORIGINS", "*")
+    cors_allow_credentials: bool = (
+        os.getenv("CRM_CORS_ALLOW_CREDENTIALS", "false").lower() == "true"
     )
 
     @property
@@ -43,6 +47,19 @@ class Settings:
     @property
     def is_sqlite(self) -> bool:
         return self.normalized_database_url.startswith("sqlite")
+
+    @property
+    def cors_origins(self) -> list[str]:
+        raw = self.cors_origins_raw.strip()
+        if not raw or raw == "*":
+            return ["*"]
+        return [item.strip() for item in raw.split(",") if item.strip()]
+
+    @property
+    def effective_expose_reset_tokens(self) -> bool:
+        if self.environment.lower() == "production":
+            return self.expose_reset_tokens
+        return True
 
 
 settings = Settings()
