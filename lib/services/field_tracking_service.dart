@@ -92,8 +92,10 @@ class FieldTrackingService {
             employeeExternalId.isNotEmpty &&
             await _remote.isConfigured()) {
           await _remote.createEvent(
-            externalId:
-                '${visit.leadId}_${DateTime.now().millisecondsSinceEpoch}_$eventType',
+            externalId: 'trk_' +
+                DateTime.now().microsecondsSinceEpoch.toString() +
+                '_' +
+                (eventType == 'location_ping' ? 'ping' : eventType),
             employeeExternalId: employeeExternalId,
             leadExternalId: visit.leadId,
             eventType: eventType,
@@ -117,6 +119,14 @@ class FieldTrackingService {
           relatedId: visit.id,
         );
       }
-    } catch (_) {}
+    } catch (exc) {
+      await AlertService.createRoleAlert(
+        title: 'Tracking Sync Issue',
+        body: 'Tracking update failed for ${visit.employeeName}: $exc',
+        targetRole: 'Admin',
+        relatedType: 'gps',
+        relatedId: visit.id,
+      );
+    }
   }
 }

@@ -40,14 +40,27 @@ class _LiveMonitorScreenState extends State<LiveMonitorScreen> {
     setState(() => _loading = true);
     final auth = context.read<AuthService>();
     if (auth.isRemoteMode && await _remote.isConfigured()) {
-      final users = await auth.getUsers();
-      final employees = users.where((AppUser u) => u.isEmployee).toList();
-      _employeeIds = employees.map((user) => user.externalId).toSet();
-      _userNames = {for (final AppUser u in employees) u.externalId: u.fullName};
       final remoteEvents = await _remote.getEvents();
-      _remoteEvents = remoteEvents
-          .where((event) => _employeeIds.contains(event.employeeExternalId))
-          .toList();
+      try {
+        final users = await auth.getUsers();
+        final employees = users.where((AppUser u) => u.isEmployee).toList();
+        _employeeIds = employees
+            .map((user) => user.externalId)
+            .where((id) => id.isNotEmpty)
+            .toSet();
+        _userNames = {
+          for (final AppUser u in employees)
+            if (u.externalId.isNotEmpty) u.externalId: u.fullName,
+        };
+      } catch (_) {
+        _employeeIds = {};
+        _userNames = {};
+      }
+      _remoteEvents = _employeeIds.isEmpty
+          ? remoteEvents
+          : remoteEvents
+              .where((event) => _employeeIds.contains(event.employeeExternalId))
+              .toList();
       _visits = [];
       _visitLogs.clear();
     } else {
@@ -205,28 +218,45 @@ class _LiveMonitorScreenState extends State<LiveMonitorScreen> {
           if (activeEntries.isEmpty)
             _emptyCard('No active employee tracking session right now.')
           else
-            ...activeEntries.map((entry) => _remoteVisitCard(entry.value, canDelete: false)),
+            ...activeEntries.map(
+                (entry) => _remoteVisitCard(entry.value, canDelete: false)),
           const SizedBox(height: 16),
           _sectionTitle('Saved Monitoring History'),
           const SizedBox(height: 10),
           if (historyEntries.isEmpty)
-            _emptyCard('Completed employee tracking stays here until admin deletes it.')
+            _emptyCard(
+                'Completed employee tracking stays here until admin deletes it.')
           else
-            ...historyEntries.map((entry) => _remoteVisitCard(entry.value, canDelete: true)),
+            ...historyEntries
+                .map((entry) => _remoteVisitCard(entry.value, canDelete: true)),
         ],
       ),
     );
   }
 
-  Widget _remoteVisitCard(List<TrackingEvent> events, {required bool canDelete}) {
+  String _resolveEmployeeName(TrackingEvent event) {
+    final mappedName = _userNames[event.employeeExternalId];
+    if (mappedName != null && mappedName.trim().isNotEmpty) {
+      return mappedName;
+    }
+    final notes = event.notes.trim();
+    if (notes.contains('|')) {
+      final candidate = notes.split('|').first.trim();
+      if (candidate.isNotEmpty) {
+        return candidate;
+      }
+    }
+    return event.employeeExternalId;
+  }
+
+  Widget _remoteVisitCard(List<TrackingEvent> events,
+      {required bool canDelete}) {
     final first = events.first;
     final last = events.last;
-    final points = events
-        .map((event) => LatLng(event.latitude, event.longitude))
-        .toList();
+    final points =
+        events.map((event) => LatLng(event.latitude, event.longitude)).toList();
     final center = points.last;
-    final employeeName =
-        _userNames[first.employeeExternalId] ?? first.employeeExternalId;
+    final employeeName = _resolveEmployeeName(first);
 
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
@@ -282,8 +312,7 @@ class _LiveMonitorScreenState extends State<LiveMonitorScreen> {
                     TileLayer(
                       urlTemplate:
                           'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                      userAgentPackageName:
-                          'com.example.bangla_voice_crm',
+                      userAgentPackageName: 'com.example.bangla_voice_crm',
                     ),
                     if (points.length >= 2)
                       PolylineLayer(
@@ -357,7 +386,8 @@ class _LiveMonitorScreenState extends State<LiveMonitorScreen> {
           if (completedVisits.isEmpty)
             _emptyCard('Completed visits stay here until admin deletes them.')
           else
-            ...completedVisits.map((visit) => _visitCard(visit, canDelete: true)),
+            ...completedVisits
+                .map((visit) => _visitCard(visit, canDelete: true)),
         ],
       ),
     );
@@ -467,7 +497,8 @@ class _LiveMonitorScreenState extends State<LiveMonitorScreen> {
                 ),
                 if (canDelete)
                   IconButton(
-                    onPressed: _deleting ? null : () => _deleteLocalVisit(visit),
+                    onPressed:
+                        _deleting ? null : () => _deleteLocalVisit(visit),
                     icon: const Icon(Icons.delete_outline),
                     tooltip: 'Delete tracking history',
                   ),

@@ -12,3 +12,4 @@ librosa
 soundfile
 numpy
 noisereduce
+resampy
