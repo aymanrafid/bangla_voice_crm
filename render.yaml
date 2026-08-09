@@ -11,7 +11,10 @@ services:
     plan: free
     buildCommand: pip install -r backend/requirements-crm.txt
     startCommand: python -m uvicorn backend.crm_server:app --host 0.0.0.0 --port $PORT
-    healthCheckPath: /health
+    # `/` answers without touching the database, so a slow or unreachable DB
+    # can no longer fail the deploy outright. `/health` still probes the DB for
+    # manual checks.
+    healthCheckPath: /
     autoDeploy: true
     envVars:
       - key: CRM_ENV

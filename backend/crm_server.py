@@ -119,17 +119,28 @@ def _get_or_create_default_company(db: Session) -> Company:
 
 
 def _ensure_multi_tenant_schema() -> None:
+    # Runs on every boot, and on the free plan the service cold-starts often, so
+    # only the tables that actually still need backfilling get written to.
+    pending: list[str] = []
     with engine.begin() as connection:
-        tables = set(inspect(connection).get_table_names())
+        inspector = inspect(connection)
+        tables = set(inspector.get_table_names())
         for table_name in TENANT_TABLES:
             if table_name not in tables:
                 continue
-            columns = {column['name'] for column in inspect(connection).get_columns(table_name)}
+            columns = {column['name'] for column in inspector.get_columns(table_name)}
             if 'company_id' not in columns:
                 connection.execute(text(f'ALTER TABLE {table_name} ADD COLUMN company_id INTEGER'))
+                pending.append(table_name)
+                continue
+            unassigned = connection.execute(text(f'SELECT 1 FROM {table_name} WHERE company_id IS NULL OR company_id = 0 LIMIT 1')).first()
+            if unassigned is not None:
+                pending.append(table_name)
     with SessionLocal() as db:
         company = _get_or_create_default_company(db)
-        for table_name in TENANT_TABLES:
+        if not pending:
+            return
+        for table_name in pending:
             db.execute(text(f'UPDATE {table_name} SET company_id = :company_id WHERE company_id IS NULL OR company_id = 0'), {'company_id': company.id})
         db.commit()
 

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
@@ -5,6 +6,16 @@ import 'package:http/http.dart' as http;
 import 'api_config_service.dart';
 
 class CrmApiClient {
+  // Render's free plan sleeps after inactivity and a cold start takes 30-60 s.
+  // Without an explicit timeout these calls hang until the OS TCP timeout, so
+  // the UI sits on a spinner that never resolves and never shows an error.
+  static const Duration _requestTimeout = Duration(seconds: 20);
+  static const Duration _coldStartTimeout = Duration(seconds: 60);
+
+  static const String _wakingUpMessage =
+      'Server is waking up — please wait a moment and try again. '
+      '(Render free tier goes to sleep after inactivity.)';
+
   final ApiConfigService _config = ApiConfigService();
 
   Future<bool> isConfigured() async {
@@ -41,41 +52,63 @@ class CrmApiClient {
     return Uri.parse('$baseUrl$path').replace(queryParameters: query);
   }
 
+  /// One attempt on the full cold-start budget. Used for writes, which are not
+  /// safe to replay: a timed-out POST may already have been applied server-side.
+  Future<http.Response> _sendOnce(
+    Future<http.Response> Function() send,
+  ) async {
+    try {
+      return await send().timeout(_coldStartTimeout);
+    } on TimeoutException {
+      throw Exception(_wakingUpMessage);
+    }
+  }
+
+  /// Short attempt, then one retry on the longer budget. Safe only for reads:
+  /// the first call wakes a sleeping server so the retry usually succeeds.
+  Future<http.Response> _sendWithRetry(
+    Future<http.Response> Function() send,
+  ) async {
+    try {
+      return await send().timeout(_requestTimeout);
+    } on TimeoutException {
+      return _sendOnce(send);
+    }
+  }
+
   Future<dynamic> get(String path, {Map<String, String>? query}) async {
     final baseUrl = await _baseUrl();
-    final response = await http.get(
-      _uri(baseUrl, path, query),
-      headers: await _headers(json: false),
-    );
+    final headers = await _headers(json: false);
+    final uri = _uri(baseUrl, path, query);
+    final response = await _sendWithRetry(() => http.get(uri, headers: headers));
     return _decodeResponse(response);
   }
 
   Future<dynamic> post(String path, Map<String, dynamic> body) async {
     final baseUrl = await _baseUrl();
-    final response = await http.post(
-      _uri(baseUrl, path),
-      headers: await _headers(),
-      body: jsonEncode(body),
-    );
+    final headers = await _headers();
+    final uri = _uri(baseUrl, path);
+    final payload = jsonEncode(body);
+    final response =
+        await _sendOnce(() => http.post(uri, headers: headers, body: payload));
     return _decodeResponse(response);
   }
 
   Future<dynamic> put(String path, Map<String, dynamic> body) async {
     final baseUrl = await _baseUrl();
-    final response = await http.put(
-      _uri(baseUrl, path),
-      headers: await _headers(),
-      body: jsonEncode(body),
-    );
+    final headers = await _headers();
+    final uri = _uri(baseUrl, path);
+    final payload = jsonEncode(body);
+    final response =
+        await _sendOnce(() => http.put(uri, headers: headers, body: payload));
     return _decodeResponse(response);
   }
 
   Future<dynamic> delete(String path) async {
     final baseUrl = await _baseUrl();
-    final response = await http.delete(
-      _uri(baseUrl, path),
-      headers: await _headers(json: false),
-    );
+    final headers = await _headers(json: false);
+    final uri = _uri(baseUrl, path);
+    final response = await _sendOnce(() => http.delete(uri, headers: headers));
     return _decodeResponse(response);
   }
 
@@ -94,6 +127,10 @@ class CrmApiClient {
       if (error != null && error.isNotEmpty) {
         throw Exception(error);
       }
+    }
+    // Render answers with an HTML error page while a service is still booting.
+    if (response.statusCode == 502 || response.statusCode == 503) {
+      throw Exception(_wakingUpMessage);
     }
     if (body.isNotEmpty) {
       throw Exception('CRM API error (${response.statusCode}): $body');
