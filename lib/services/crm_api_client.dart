@@ -128,8 +128,15 @@ class CrmApiClient {
         throw Exception(error);
       }
     }
-    // Render answers with an HTML error page while a service is still booting.
+    // Render answers with an HTML error page for both a booting service and a
+    // suspended one, and those need very different responses from the user.
     if (response.statusCode == 502 || response.statusCode == 503) {
+      if (body.toLowerCase().contains('suspended')) {
+        throw Exception(
+          'This server is suspended on Render. Check the CRM API URL in '
+          'Settings — it may still point at an old service.',
+        );
+      }
       throw Exception(_wakingUpMessage);
     }
     if (body.isNotEmpty) {

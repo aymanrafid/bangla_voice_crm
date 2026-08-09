@@ -1,12 +1,21 @@
 databases:
-  - name: bangla-voice-crm-db
-    databaseName: bangla_voice_crm
+  # Matches the live instance. `databaseName` and `user` are honoured only at
+  # creation time — Render cannot rename an existing database — so these are
+  # recorded to describe what is actually deployed, not to change it.
+  - name: bangla-voice-crm-db-jdk8
+    databaseName: bangla_voice_crm_abnm
     user: bangla_voice_crm_user
     plan: free
 
 services:
   - type: web
-    name: bangla-voice-crm-api
+    # Must match the live service, which is bangla-voice-crm-api-jdk8.onrender.com.
+    # Render appended the suffix because an older, now-suspended service still
+    # holds the plain `bangla-voice-crm-api` name. Delete that suspended service
+    # to free the name, then rename here and in CRM_PUBLIC_BASE_URL together —
+    # changing the name mints a new hostname and the app's Settings URL must
+    # follow it.
+    name: bangla-voice-crm-api-jdk8
     runtime: python
     plan: free
     buildCommand: pip install -r backend/requirements-crm.txt
@@ -21,7 +30,7 @@ services:
         value: production
       - key: CRM_DATABASE_URL
         fromDatabase:
-          name: bangla-voice-crm-db
+          name: bangla-voice-crm-db-jdk8
           property: connectionString
       - key: CRM_JWT_SECRET
         generateValue: true
@@ -37,6 +46,8 @@ services:
         value: System Admin
       - key: CRM_BOOTSTRAP_ADMIN_ROLE
         value: SuperAdmin
+      # Set in the dashboard. Must be this service's own https URL — it builds
+      # the password-reset links, so a stale value sends users to a dead host.
       - key: CRM_PUBLIC_BASE_URL
         sync: false
       - key: CRM_EXPOSE_RESET_TOKENS

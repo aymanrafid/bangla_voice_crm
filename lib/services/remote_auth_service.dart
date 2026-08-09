@@ -53,7 +53,7 @@ class RemoteAuthService {
     }
 
     if (response.statusCode != 200) {
-      final message = _extractError(response.body) ?? 'Login failed.';
+      final message = _extractError(response.body, response.statusCode) ?? 'Login failed.';
       throw Exception(message);
     }
 
@@ -83,7 +83,7 @@ class RemoteAuthService {
 
     if (response.statusCode != 200) {
       final message =
-          _extractError(response.body) ?? 'Session validation failed.';
+          _extractError(response.body, response.statusCode) ?? 'Session validation failed.';
       throw Exception(message);
     }
     final data = jsonDecode(response.body) as Map<String, dynamic>;
@@ -124,7 +124,7 @@ class RemoteAuthService {
     }
 
     if (response.statusCode != 200) {
-      final message = _extractError(response.body) ?? 'User creation failed.';
+      final message = _extractError(response.body, response.statusCode) ?? 'User creation failed.';
       throw Exception(message);
     }
     return AppUser.fromApiMap(
@@ -147,7 +147,7 @@ class RemoteAuthService {
     }
 
     if (response.statusCode != 200) {
-      final message = _extractError(response.body) ?? 'Failed to load users.';
+      final message = _extractError(response.body, response.statusCode) ?? 'Failed to load users.';
       throw Exception(message);
     }
     final data = jsonDecode(response.body) as List<dynamic>;
@@ -172,7 +172,7 @@ class RemoteAuthService {
 
     if (response.statusCode != 200) {
       final message =
-          _extractError(response.body) ?? 'Failed to load companies.';
+          _extractError(response.body, response.statusCode) ?? 'Failed to load companies.';
       throw Exception(message);
     }
     final data = jsonDecode(response.body) as List<dynamic>;
@@ -214,7 +214,7 @@ class RemoteAuthService {
 
     if (response.statusCode != 200) {
       final message =
-          _extractError(response.body) ?? 'Company creation failed.';
+          _extractError(response.body, response.statusCode) ?? 'Company creation failed.';
       throw Exception(message);
     }
     return CompanyProvisionResult.fromApiMap(
@@ -222,14 +222,26 @@ class RemoteAuthService {
     );
   }
 
-  String? _extractError(String body) {
+  String? _extractError(String body, [int statusCode = 0]) {
     try {
       final data = jsonDecode(body);
       if (data is Map<String, dynamic>) {
-        return data['detail']?.toString();
+        final detail = data['detail']?.toString();
+        if (detail != null && detail.isNotEmpty) return detail;
       }
     } catch (_) {
-      return null;
+      // Not JSON — fall through to the platform-level checks below.
+    }
+    // Render serves an HTML page, not JSON, when a service is unavailable.
+    // Decoding it fails, which used to collapse every one of these into a bare
+    // "Login failed." and hide the real cause.
+    if (statusCode == 502 || statusCode == 503) {
+      if (body.toLowerCase().contains('suspended')) {
+        return 'This server is suspended on Render. Check the CRM API URL in '
+            'Settings — it may still point at an old service.';
+      }
+      return 'Server is waking up — please wait a moment and try again. '
+          '(Render free tier goes to sleep after inactivity.)';
     }
     return null;
   }

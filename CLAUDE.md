@@ -2,295 +2,103 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Project Overview
+## Overview
 
-**Bangla Voice CRM** is a full-stack mobile and web application for lead management and field operations. It features Bangla audio transcription via BanglaASR, CRM field auto-extraction, and multi-tenant role-based access.
+Bangla Voice CRM is a Flutter mobile app backed by two independent FastAPI services. Field staff capture leads by speaking Bangla; audio is transcribed by a self-hosted BanglaASR model, CRM fields are extracted from the transcript, and leads sync to a multi-tenant server.
 
-**Stack:**
-- **Frontend:** Flutter (Dart) — Android/iOS mobile app
-- **Backend:** Python FastAPI — Dual servers (ASR + CRM)
-- **Database:** SQLite (mobile), PostgreSQL (backend production)
-- **Key Libraries:** FastAPI, SQLAlchemy, Transformers, Librosa, Provider (Flutter state management)
+The two backends are deployed separately and share no process:
 
----
+- `backend/crm_server.py` — auth, leads, reports, tracking, media. Postgres.
+- `backend/asr_server.py` — audio transcription only. No database.
 
-## Architecture & Key Modules
-
-### Frontend (Flutter)
-
-**Three main shells based on user role:**
-- `admin_shell_screen.dart` — SuperAdmin/Admin dashboard with company management, user management, live monitoring
-- `employee_shell_screen.dart` — Employee field ops: voice leads, text leads, field reports, meetings, alerts
-- `login_screen.dart` — Authentication with JWT token exchange
-
-**Core services:**
-- **auth_service.dart** — JWT token management, user initialization, role detection
-- **asr_service.dart** — Posts audio to backend `/transcribe` endpoint, handles retries
-- **crm_api_client.dart** — All REST calls to CRM backend (leads, reports, tracking, users)
-- **lead_remote_service.dart** — Lead CRUD, syncing, assignment
-- **database_service.dart** — Local SQLite for offline lead data
-- **field_tracking_service.dart** — GPS, location, and field visit tracking
-- **offline_report_queue_service.dart** — Queues field reports when offline, syncs on reconnect
-- **media_upload_service.dart** — Handles image/video uploads with resumable chunks
-- **notification_service.dart** — Local and push notifications via Firebase
-
-**Screens follow a pattern:**
-- Voice/text input → ASR/extraction → Lead creation
-- Dashboard displays all leads, filterable by status/employee
-- Lead detail shows full transcript, allows manual override of extracted fields
-- Field reports capture location, images, and structured data
-- Meetings and alerts for follow-ups
-
-### Backend (Python)
-
-**Two separate FastAPI servers:**
-
-1. **asr_server.py** — Audio transcription
-   - Loads BanglaASR model at startup (GPU or CPU)
-   - Handles audio preprocessing: resampling, silence trimming, noise reduction
-   - Returns JSON with `text`, `debug` (timings/device info), and `error`
-   - Supports async job processing for long audio via ThreadPoolExecutor
-   - Config via env vars: `BANGLA_ASR_DEVICE` (cuda:0 or cpu), `BANGLA_ASR_MIN_SECONDS`, `BANGLA_ASR_MAX_AUDIO_MB`
-
-2. **crm_server.py** — Core CRM + multi-tenant management
-   - **Auth:** JWT-based login, password reset tokens, role-based access (SuperAdmin/Admin/Employee)
-   - **Multi-tenant:** All data scoped by `company_id`; SuperAdmin can view all companies
-   - **Models:** User, Company, Lead, FieldReport, TrackingEvent, UploadedMedia, AuditLog, Meeting
-   - **Lead management:** CRUD, status updates, assignment, AI fields (intent, sentiment, priority, lead_score)
-   - **Field reports:** Structured capture with images, GPS coordinates, timestamp
-   - **Tracking:** Real-time GPS logs and field visit events
-   - **Audit logging:** All user actions logged for compliance
-
-**Database setup:**
-- SQLAlchemy ORM with PostgreSQL (production) or SQLite (development)
-- Migrations handled by ORM schema creation
-- Multi-tenant schema ensures isolation via `company_id` on all tenant tables
-
-**Key endpoints (CRM):**
-- `/auth/login` — JWT authentication
-- `/leads` — CRUD + list (scoped to user's company)
-- `/field-reports` — Submit structured field reports with media
-- `/tracking/events` — Log GPS and field visit events
-- `/users` — User management (Admin only)
-- `/companies` — Company provisioning (SuperAdmin only)
-- `/audit-logs` — Audit trail (Admin only)
-
----
-
-## Common Development Tasks
-
-### Running Flutter
+## Commands
 
 ```bash
-# Install dependencies
-cd bangla_voice_crm
+# Flutter
 flutter pub get
-
-# Run on connected Android device/emulator
 flutter run -d android
-
-# Run on iOS
-flutter run -d ios
-
-# Build release APK
-flutter build apk --release
-# Output: build/app/outputs/flutter-apk/app-release.apk
-
-# Build release bundle (for Play Store)
-flutter build appbundle --release
-# Output: build/app/outputs/bundle/release/app-release.aab
-```
-
-### Running Backend
-
-```bash
-# Setup Python environment
-cd backend
-python -m venv .venv
-.venv\Scripts\activate  # Windows
-source .venv/bin/activate  # macOS/Linux
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Run CRM server (port 8000)
-python -m uvicorn crm_server:app --host 0.0.0.0 --port 8000 --reload
-
-# Run ASR server (port 8001)
-python -m uvicorn asr_server:app --host 0.0.0.0 --port 8001 --reload
-
-# For production, set environment variables:
-# CRM_DATABASE_URL=postgresql+psycopg://user:pwd@host/dbname
-# CRM_JWT_SECRET=your-secret
-# BANGLA_ASR_DEVICE=cuda:0  # or 'cpu' if no GPU
-```
-
-### Testing
-
-**Flutter:**
-```bash
-# Run all tests
+flutter build apk --release          # build/app/outputs/flutter-apk/app-release.apk
+flutter analyze lib/services/foo.dart   # accepts specific paths; fast
 flutter test
-
-# Run a single test file
-flutter test test/services/crm_extractor_test.dart
-
-# Run with coverage
-flutter test --coverage
-lcov --list coverage/lcov.info
+flutter test test/lead_voice_update_service_test.dart   # single file
 ```
 
-**Backend:**
+Only two test files exist: `test/widget_test.dart` and `test/lead_voice_update_service_test.dart`. There is no backend test suite and no pytest dependency.
+
 ```bash
-# Run pytest (if test files exist)
-pytest backend/
+# Backend — note the three separate requirements files
+cd backend
+python -m venv .venv && .venv/Scripts/activate
+pip install -r requirements-crm.txt     # lean: fastapi, sqlalchemy, psycopg, jose, passlib
+pip install -r requirements-asr.txt     # heavy: torch, transformers, librosa
+# requirements.txt is the union of both; installing it pulls torch into a CRM-only env
 
-# Or use Python's built-in unittest
-python -m unittest discover backend/
+python -m uvicorn backend.crm_server:app --reload --port 8000   # run from repo root
+python -m uvicorn asr_server:app --reload --port 8001           # run from backend/
 ```
 
----
+`asr_server.py` has a try/except around its own imports so it works either as `backend.asr_server` or as `asr_server` from inside `backend/`. `crm_server.py` uses relative imports and must be run as `backend.crm_server` from the repo root.
 
-## Configuration & Environment Variables
+Backend defaults to SQLite (`crm_prod.db`); set `CRM_DATABASE_URL` for Postgres. `config.py` normalizes `postgres://` and `postgresql://` to `postgresql+psycopg://`.
 
-### Backend CRM Server (`crm_server.py`)
-```
-CRM_APP_NAME                        # App name in docs
-CRM_ENV                             # 'development' or 'production'
-CRM_DATABASE_URL                    # SQLite or PostgreSQL connection string
-CRM_JWT_SECRET                      # Secret for JWT signing (change in production)
-CRM_JWT_ALGORITHM                   # Default: HS256
-CRM_ACCESS_TOKEN_EXPIRE_MINUTES     # Default: 720 (12 hours)
-CRM_BOOTSTRAP_COMPANY_NAME          # First company name
-CRM_BOOTSTRAP_ADMIN_USERNAME        # Initial admin username
-CRM_BOOTSTRAP_ADMIN_PASSWORD        # Initial admin password
-CRM_PUBLIC_BASE_URL                 # For password reset links
-CRM_CORS_ORIGINS                    # Comma-separated or '*'
-```
+## Deployment
 
-### Backend ASR Server (`asr_server.py`)
-```
-BANGLA_ASR_MODEL_ID                 # Default: bangla-speech-processing/BanglaASR
-BANGLA_ASR_DEVICE                   # 'cuda:0', 'cpu', etc.
-BANGLA_ASR_MIN_SECONDS              # Minimum audio duration (default: 1.8)
-BANGLA_ASR_MAX_AUDIO_MB             # File size limit (default: 50 MB)
-BANGLA_ASR_MAX_SYNC_SECONDS         # Timeout for sync requests (default: 45)
-BANGLA_ASR_JOB_WORKERS              # Async job workers (default: 1)
-BANGLA_ASR_NOISE_REDUCTION          # 'auto', 'always', or 'off'
-```
+**Only the CRM server is deployed to Render**, via `render.yaml` — as `bangla-voice-crm-api-jdk8` with the `bangla-voice-crm-db-jdk8` Postgres instance.
 
-### Flutter (Settings Screen)
-Users configure:
-- **API Base URL** — Points to backend CRM server (e.g., `http://192.168.0.113:8000`)
-- **ASR URL** — Points to ASR server (e.g., `http://192.168.0.113:8001/transcribe`)
-- API credentials are stored in `FlutterSecureStorage`
+**ASR is not run on Render.** It is served from a local machine and exposed through an ngrok tunnel, with that tunnel URL entered as the ASR URL in the app's Settings screen. `render.asr.yaml` and the `bangla-voice-asr-api` service are leftovers and are not in use — the deployed instance does not respond, and that is expected. Do not spend time diagnosing it.
 
----
+**The live CRM host is `bangla-voice-crm-api-jdk8.onrender.com`.** An older service holds the plain `bangla-voice-crm-api` name and is suspended — it returns a 503 HTML page, not JSON. If login or sync fails, verify the URL in the app's Settings screen before touching code. A quick `curl https://<host>/health` distinguishes a real bug from a misrouted client in seconds; do this first.
 
-## Key Design Patterns
+Free-plan constraints that shape the code:
 
-### Multi-Tenant Isolation
-- Every user belongs to one company (`user.company_id`)
-- Queries automatically scope to `current_user.company_id` via `_scope_company()` helper
-- SuperAdmin bypasses company scoping via `_is_super_admin()` check
-- Company data isolation enforced at the database level (no cross-company leaks)
+- Services sleep after inactivity; a cold start takes 30–60s. Every client call needs an explicit timeout or it hangs until the OS TCP timeout, showing a spinner that never resolves.
+- Render returns HTML (not JSON) for 502/503, so any `jsonDecode` on an error body must be guarded.
+- The filesystem is ephemeral. `crm_server.py` writes uploads to `backend/uploads` and serves them at `/media-files`, so **every deploy permanently 404s previously uploaded report images**. Unresolved; needs a Render disk or object storage.
+- `public_url` on `UploadedMedia` is built from `request.base_url` at upload time, baking the hostname into stored rows. Rows written under an old hostname stay broken after a rename.
 
-### Role-Based Access
-- **SuperAdmin** — Manage all companies and users, bypass all company scoping
-- **Admin** — Manage own company's users, leads, and reports
-- **Employee** — Create leads, submit field reports, view own assignments
+## Backend architecture
 
-### State Management (Flutter)
-- **Provider** — Used for auth state (`AuthService`) and critical service initialization
-- **ChangeNotifier** — Services that notify listeners of state changes
-- **Consumer/Watch** — UI rebuilds when dependent services change
+**Multi-tenancy.** Every tenant table carries `company_id`. Queries pass through `_scope_company()`, which filters by `current_user.company_id` unless `_is_super_admin()`. Roles: `SuperAdmin` (crosses companies), `Admin`, `Manager`, `Employee`. Enforced by `require_roles(...)` from `deps.py`.
 
-### Offline-First for Field Ops
-- **offline_report_queue_service.dart** — Stores field reports locally when offline
-- Syncs automatically when connectivity restored
-- Local SQLite serves as cache; backend PostgreSQL is source of truth
+**Schema management.** No Alembic. `_startup()` calls `Base.metadata.create_all`, then `_ensure_multi_tenant_schema()`, which adds any missing `company_id` columns via raw `ALTER TABLE` and backfills only the tables that actually have unassigned rows. That guard matters: the backfill originally ran six unconditional `UPDATE`s on every boot, and cold starts are frequent here.
 
-### Audio Preprocessing Pipeline
-1. Check file size and duration
-2. Resample to 16kHz mono (required for BanglaASR)
-3. Trim leading/trailing silence
-4. Apply noise reduction if audio quality is poor
-5. Normalize audio level
-6. Send to ASR model
+**Models** (`models.py`): `Company`, `User`, `Lead`, `TrackingEvent`, `FieldReport`, `UploadedMedia`, `AuditLog`, `PasswordResetToken`. Note that meetings exist only in the Flutter app's local SQLite (`lib/models/meeting.dart`) — there is no server-side meetings table or endpoint.
 
----
+**Endpoint paths do not match their concepts** — check `crm_server.py` before assuming:
 
-## Important Files & Patterns
+| Concept | Actual path |
+|---|---|
+| Create user | `POST /auth/users` |
+| List users | `GET /users` |
+| Field reports | `/reports`, `PUT /reports/{id}/review` |
+| GPS / visit tracking | `/field-tracking` |
+| Delta sync | `GET /sync/changes` |
+| Health | `GET /health` (hits DB), `GET /` (does not) |
 
-### Frontend
-- `lib/main.dart` — Entry point, auth gate, role-based shell routing
-- `lib/services/auth_service.dart` — JWT token lifecycle and current user state
-- `lib/services/crm_api_client.dart` — All backend HTTP calls, error handling
-- `lib/screens/voice_input_screen.dart` — Record/upload audio, call ASR, create lead
-- `lib/screens/dashboard_screen.dart` — List leads, filter, search
-- `pubspec.yaml` — Dependencies; note `provider` for state, `sqflite` for offline storage
+`healthCheckPath` in `render.yaml` points at `/` deliberately, so a slow database cannot fail an otherwise-good deploy.
 
-### Backend
-- `backend/crm_server.py` — Main FastAPI app; auth routes, CRUD endpoints, multi-tenant logic
-- `backend/asr_server.py` — Audio transcription; async job processing with ThreadPoolExecutor
-- `backend/models.py` — SQLAlchemy ORM: User, Company, Lead, FieldReport, TrackingEvent, AuditLog
-- `backend/database.py` — SQLAlchemy session, engine, base class
-- `backend/deps.py` — Dependency injection: `get_current_user`, `require_roles`
-- `backend/audio_preprocessing.py` — Librosa audio pipeline: resample, trim, denoise, normalize
-- `backend/config.py` — Settings class; environment variable parsing and validation
+**Passwords** use `pbkdf2_sha256` via passlib (`security.py`) — not bcrypt, despite `passlib[bcrypt]` in requirements. The usual passlib/bcrypt version breakage does not apply here.
 
----
+**Engine** (`database.py`) sets `pool_pre_ping=True` always and `pool_recycle=280` for Postgres, because managed Postgres drops idle connections and a stale pooled socket stalls rather than failing fast.
 
-## Recent Work & Known Issues
+## Flutter architecture
 
-**Recent commits:**
-- Fixed login timeout and added Render startup banner
-- Prepared backend for production (PostgreSQL, env-based config)
-- Employee monitoring and tracking sync improvements
-- Voice UI and ASR cleanup, phone number parsing fixes
+`main.dart` gates the entire UI behind `AuthService.initialize()`, routing to `AdminShellScreen` or `EmployeeShellScreen` by role. Any unbounded network call on that path freezes the app at a bare spinner.
 
-**Deployment:**
-- Backend deployed to Render.com with PostgreSQL
-- Mobile app connects to Render backend URL
-- Local development uses SQLite; `CRM_DATABASE_URL` env var switches to PostgreSQL
+**Three HTTP layers, and they are not interchangeable:**
 
----
+- `remote_auth_service.dart` — auth only (`/auth/*`, `/users`, `/companies`). 60s login timeout, 20s otherwise.
+- `crm_api_client.dart` — everything else, used by `lead_remote_service`, `tracking_remote_service`, `report_remote_service`. Reads retry once (20s then 60s); writes get a single 60s attempt and are deliberately **not** retried, since a timed-out POST may already have been applied.
+- `media_upload_service.dart` — multipart uploads, 90s.
 
-## Tips for Development
+All three decode error bodies defensively and map 502/503 to distinct "suspended" vs "waking up" messages. When adding a call, route it through one of these rather than calling `http` directly.
 
-1. **Local Backend Setup:**
-   - Run both `crm_server:app` and `asr_server:app` in separate terminals on ports 8000 and 8001
-   - In Flutter Settings, set API URL to your machine's IP (not `localhost`; mobile can't reach it)
-   
-2. **Audio Testing:**
-   - Place `.wav` files in a known directory; use file picker to upload
-   - ASR expects 16kHz mono WAV; preprocessing handles conversion
-   - If ASR is slow, check GPU availability via `/model-info` endpoint
+**Offline behavior.** `offline_report_queue_service.dart` queues field reports locally and retries on login and reconnect. Local SQLite (`database_service.dart`) is a cache; the server is authoritative for anything with an `external_id`.
 
-3. **Database Debugging:**
-   - For SQLite: Open `crm_prod.db` with SQLiteBrowser or similar
-   - For PostgreSQL: Use `psql` or DataGrip
-   - Check `audit_logs` table to trace user actions
+**Identity.** Naming differs across the boundary and is easy to get wrong. `Lead` has no `externalId` field — its `leadId` (the `LEAD-0001` string) is what serializes to and from the server's `external_id`, in `lead_remote_service.dart`. `AppUser` does have a real `externalId` UUID. Local integer `id` values are SQLite-only and must never be sent to the server.
 
-4. **Multi-Tenant Testing:**
-   - Create multiple companies in Settings > Company Management
-   - Create users under different companies
-   - Verify that users only see their company's data
+## Configuration
 
-5. **Mobile Permissions:**
-   - Android: Declared in `android/app/src/main/AndroidManifest.xml` (mic, internet, location, read/write storage)
-   - iOS: Declared in `ios/Runner/Info.plist`
-   - Request at runtime via `permission_handler` package
+App-side settings live in the Settings screen, not in code: CRM API base URL and ASR URL go to `SharedPreferences`; tokens and cached session go to `FlutterSecureStorage` (`api_config_service.dart`). An empty CRM base URL puts the app in local-only mode with a seeded `admin`/`admin123` account — remote mode is inferred purely from that URL being non-empty.
 
-6. **API Error Handling:**
-   - All CRM endpoints return `{ "detail": "..." }` on error with HTTP status code
-   - ASR endpoint returns `{ "error": "..." }` on audio quality issues
-   - Flutter `crm_api_client.dart` wraps errors and shows user-facing messages
-
----
-
-## Rendering / Deployment Notes
-
-- **Render PostgreSQL** requires `CRM_DATABASE_URL` in format: `postgresql+psycopg://user:pwd@host/dbname`
-- **ASR Model** (~2GB) is loaded once at startup; first request is slow but subsequent calls are fast
-- **Concurrent Requests:** Backend handles multi-threaded load via `ThreadPoolExecutor`; scale workers via `BANGLA_ASR_JOB_WORKERS`
+Backend env vars are read in `config.py` (`CRM_*`) and at the top of `asr_server.py` (`BANGLA_ASR_*`); both files list every variable with its default.
