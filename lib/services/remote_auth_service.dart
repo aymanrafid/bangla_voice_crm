@@ -65,6 +65,49 @@ class RemoteAuthService {
     );
   }
 
+  /// Public company self-registration. Unlike [createCompany] this carries no
+  /// bearer token — the account being created is the caller's first one.
+  /// Uses the login budget because it is the other cold-start entry point.
+  Future<CompanyProvisionResult> signup({
+    required String baseUrl,
+    required String companyName,
+    required String adminUsername,
+    required String adminPassword,
+    required String adminFullName,
+    String? slug,
+  }) async {
+    late final http.Response response;
+    try {
+      response = await http
+          .post(
+            _uri(baseUrl, '/auth/signup'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'name': companyName.trim(),
+              'slug': (slug ?? '').trim().isEmpty ? null : slug!.trim(),
+              'admin_username': adminUsername.trim(),
+              'admin_password': adminPassword,
+              'admin_full_name': adminFullName.trim(),
+            }),
+          )
+          .timeout(_loginTimeout);
+    } on TimeoutException {
+      throw Exception(
+        'Server is waking up — please wait a moment and try again. '
+        '(Render free tier goes to sleep after inactivity.)',
+      );
+    }
+
+    if (response.statusCode != 200) {
+      final message =
+          _extractError(response.body, response.statusCode) ?? 'Signup failed.';
+      throw Exception(message);
+    }
+    return CompanyProvisionResult.fromApiMap(
+      jsonDecode(response.body) as Map<String, dynamic>,
+    );
+  }
+
   Future<AppUser> me({
     required String baseUrl,
     required String accessToken,

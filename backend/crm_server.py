@@ -197,28 +197,50 @@ def list_companies(db: Session = Depends(get_db), current_user: User = Depends(r
     return db.query(Company).order_by(Company.name.asc()).all()
 
 
-@app.post('/companies', response_model=CompanyProvisionResponse)
-def create_company(payload: CompanyCreateRequest, db: Session = Depends(get_db), current_user: User = Depends(require_roles('Admin'))):
-    if not _is_super_admin(current_user):
-        raise HTTPException(status_code=403, detail='Only super admin can create companies.')
-    slug = _slugify(payload.slug or payload.name)
+def _provision_company(db: Session, payload: CompanyCreateRequest, *, actor: User | None, action: str) -> CompanyProvisionResponse:
+    name = payload.name.strip()
+    admin_username = payload.admin_username.strip()
+    admin_full_name = payload.admin_full_name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail='Company name is required.')
+    if not admin_username:
+        raise HTTPException(status_code=422, detail='Admin username is required.')
+    if not admin_full_name:
+        raise HTTPException(status_code=422, detail='Admin full name is required.')
+    slug = _slugify(payload.slug or name)
     if db.query(Company).filter(Company.slug == slug).first() is not None:
         raise HTTPException(status_code=409, detail='Company slug already exists.')
-    if db.query(Company).filter(Company.name == payload.name.strip()).first() is not None:
+    if db.query(Company).filter(Company.name == name).first() is not None:
         raise HTTPException(status_code=409, detail='Company name already exists.')
-    if db.query(User).filter(User.username == payload.admin_username.strip()).first() is not None:
+    if db.query(User).filter(User.username == admin_username).first() is not None:
         raise HTTPException(status_code=409, detail='Admin username already exists.')
-    company = Company(name=payload.name.strip(), slug=slug, status='active')
+    company = Company(name=name, slug=slug, status='active')
     db.add(company)
     db.flush()
-    admin_user = User(username=payload.admin_username.strip(), company_id=company.id, full_name=payload.admin_full_name.strip(), password_hash=hash_password(payload.admin_password), role='Admin', is_active=True)
+    admin_user = User(username=admin_username, company_id=company.id, full_name=admin_full_name, password_hash=hash_password(payload.admin_password), role='Admin', is_active=True)
     db.add(admin_user)
     db.flush()
-    _log_action(db, action='create_company', entity_type='company', entity_external_id=company.external_id, details=f'Created company {company.name} with admin {admin_user.username}.', actor=current_user, company_id=company.id)
+    _log_action(db, action=action, entity_type='company', entity_external_id=company.external_id, details=f'Created company {company.name} with admin {admin_user.username}.', actor=actor, company_id=company.id)
     db.commit()
     db.refresh(company)
     db.refresh(admin_user)
     return CompanyProvisionResponse(company=company, admin_user=admin_user)
+
+
+@app.post('/companies', response_model=CompanyProvisionResponse)
+def create_company(payload: CompanyCreateRequest, db: Session = Depends(get_db), current_user: User = Depends(require_roles('Admin'))):
+    if not _is_super_admin(current_user):
+        raise HTTPException(status_code=403, detail='Only super admin can create companies.')
+    return _provision_company(db, payload, actor=current_user, action='create_company')
+
+
+@app.post('/auth/signup', response_model=CompanyProvisionResponse)
+def signup(payload: CompanyCreateRequest, db: Session = Depends(get_db)):
+    # Public and unauthenticated by design: this is how a new company onboards
+    # itself. It shares _provision_company with the SuperAdmin route so both
+    # paths enforce the same uniqueness checks and write the same audit entry,
+    # with actor=None recording the actor role as 'System'.
+    return _provision_company(db, payload, actor=None, action='self_signup')
 
 
 @app.post('/media/upload', response_model=UploadedMediaRead)

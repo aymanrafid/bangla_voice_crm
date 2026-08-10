@@ -7,6 +7,7 @@ import '../services/api_config_service.dart';
 import '../services/auth_service.dart';
 import '../theme.dart';
 import 'settings_screen.dart';
+import 'signup_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -85,6 +86,27 @@ class _LoginScreenState extends State<LoginScreen> {
       MaterialPageRoute(builder: (_) => const SettingsScreen()),
     );
     await _loadUrls();
+  }
+
+  Future<void> _openSignup() async {
+    final result = await Navigator.of(context).push<SignupResult>(
+      MaterialPageRoute(builder: (_) => const SignupScreen()),
+    );
+    if (result == null || !mounted) return;
+    // Prefill so the new admin can log in without retyping anything.
+    setState(() {
+      _usernameController.text = result.username;
+      _companySlugController.text = result.companySlug;
+      _passwordController.clear();
+    });
+    await _config.saveCompanySlug(result.companySlug);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Workspace created. Enter your password to log in.'),
+        duration: Duration(seconds: 5),
+      ),
+    );
   }
 
   @override
@@ -245,6 +267,30 @@ class _LoginScreenState extends State<LoginScreen> {
                               )
                             : const Icon(Icons.login),
                         label: Text(auth.isLoading ? 'Logging in...' : 'Login'),
+                      ),
+                      const SizedBox(height: 14),
+                      Row(
+                        children: [
+                          Expanded(child: Divider(color: Colors.grey.shade300)),
+                          Padding(
+                            padding:
+                                const EdgeInsets.symmetric(horizontal: 12),
+                            child: Text(
+                              'New here?',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey.shade600,
+                              ),
+                            ),
+                          ),
+                          Expanded(child: Divider(color: Colors.grey.shade300)),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      OutlinedButton.icon(
+                        onPressed: auth.isLoading ? null : _openSignup,
+                        icon: const Icon(Icons.apartment_rounded, size: 18),
+                        label: const Text('Register your Company'),
                       ),
                       if (auth.isRemoteMode) ...[
                         const SizedBox(height: 14),

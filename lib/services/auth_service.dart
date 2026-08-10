@@ -194,6 +194,92 @@ class AuthService extends ChangeNotifier {
     return true;
   }
 
+  /// Mirrors the server's `_slugify` so a locally-created workspace carries the
+  /// same slug it would get remotely.
+  static String _slugify(String value) {
+    final slug = value
+        .trim()
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '-')
+        .replaceAll(RegExp(r'^-+|-+$'), '');
+    return slug.isEmpty ? 'company' : slug;
+  }
+
+  /// Provisions a company workspace plus its first Admin account.
+  ///
+  /// Remote mode delegates to `POST /auth/signup`. Local mode creates the
+  /// account in SQLite so demo/offline installs can still onboard. Returns the
+  /// resulting company slug on success (needed to log in under multi-company
+  /// mode), or null on failure with [error] set.
+  Future<String?> registerAdmin({
+    required String companyName,
+    required String adminFullName,
+    required String username,
+    required String password,
+  }) async {
+    _loading = true;
+    _error = '';
+    notifyListeners();
+
+    final baseUrl = await _config.getCrmApiBaseUrl();
+    _remoteMode = baseUrl.isNotEmpty;
+    final slug = _slugify(companyName);
+
+    if (_remoteMode) {
+      try {
+        final result = await _remoteAuth.signup(
+          baseUrl: baseUrl,
+          companyName: companyName,
+          adminUsername: username,
+          adminPassword: password,
+          adminFullName: adminFullName,
+        );
+        final createdSlug = result.company.slug.isNotEmpty
+            ? result.company.slug
+            : slug;
+        await _config.saveCompanySlug(createdSlug);
+        _loading = false;
+        notifyListeners();
+        return createdSlug;
+      } catch (exc) {
+        _loading = false;
+        _error = exc.toString().replaceFirst('Exception: ', '');
+        notifyListeners();
+        return null;
+      }
+    }
+
+    try {
+      final existing = await _db.getUserByUsername(username.trim());
+      if (existing != null) {
+        _loading = false;
+        _error = 'This username already exists.';
+        notifyListeners();
+        return null;
+      }
+      await _db.createUser(
+        AppUser(
+          username: username.trim(),
+          passwordHash: BCrypt.hashpw(password, BCrypt.gensalt()),
+          role: 'Admin',
+          fullName: adminFullName.trim(),
+          companyName: companyName.trim(),
+          companySlug: slug,
+          isActive: true,
+          createdAt: DateTime.now().toIso8601String(),
+        ),
+      );
+      _loading = false;
+      notifyListeners();
+      return slug;
+    } catch (exc) {
+      _loading = false;
+      _error = exc.toString().replaceFirst('Exception: ', '');
+      notifyListeners();
+      return null;
+    }
+  }
+
   Future<void> _retryQueuedReports() async {
     final user = _currentUser;
     if (user == null || !_remoteMode) {
