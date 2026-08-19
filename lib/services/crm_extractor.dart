@@ -259,8 +259,18 @@ class CrmExtractor {
     return output;
   }
 
+  /// Matching-only normalisation. Callers return slices of the *raw* text, so
+  /// nothing here reaches the values shown to the user.
+  ///
+  /// Two of the transformations exist purely to absorb known ASR error modes:
+  /// the model sprinkles spurious chandrabindu (ঁ) onto words, turning
+  /// থাকি into থাঁকি, and it breaks case endings off with a hyphen,
+  /// turning মিরপুরে into মিরপুর-এ. Both silently defeated
+  /// keyword and gazetteer matching.
   static String _normalizeText(String input) {
     return normalizeBanglaDigits(input.toLowerCase())
+        .replaceAll('ঁ', '')
+        .replaceAll(RegExp(r'[-‐-―]'), ' ')
         .replaceAll(RegExp(r'[,:;!?()\[\]{}]'), ' ')
         .replaceAll('।', ' ')
         .replaceAll(RegExp(r'\s+'), ' ')

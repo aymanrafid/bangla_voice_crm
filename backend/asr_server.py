@@ -50,7 +50,11 @@ SEGMENT_SPLIT_TOP_DB = int(os.getenv('BANGLA_ASR_SEGMENT_SPLIT_TOP_DB', str(DEFA
 MAX_AUDIO_MB = int(os.getenv('BANGLA_ASR_MAX_AUDIO_MB', '50'))
 MAX_SYNC_SECONDS = float(os.getenv('BANGLA_ASR_MAX_SYNC_SECONDS', '45'))
 LANGUAGE = os.getenv('BANGLA_ASR_LANGUAGE', 'bn')
-NO_REPEAT_NGRAM = int(os.getenv('BANGLA_ASR_NO_REPEAT_NGRAM', '4'))
+# Default OFF: Bangladeshi mobile numbers legitimately repeat digits, and a
+# dictated 01711117777 produces repeated n-grams that this would suppress,
+# corrupting valid numbers. repetition_penalty plus condition_on_prev_tokens
+# handle the runaway-loop case without that risk. Raise it only if loops return.
+NO_REPEAT_NGRAM = int(os.getenv('BANGLA_ASR_NO_REPEAT_NGRAM', '0'))
 REPETITION_PENALTY = float(os.getenv('BANGLA_ASR_REPETITION_PENALTY', '1.15'))
 CONDITION_ON_PREV = os.getenv('BANGLA_ASR_CONDITION_ON_PREV', 'false').lower() == 'true'
 _generate_kwargs_supported = True
@@ -545,7 +549,7 @@ def _decode_kwargs() -> dict:
         'language': LANGUAGE,
         'task': 'transcribe',
         # Hard block on repeating any n-gram: the direct fix for the loop.
-        'no_repeat_ngram_size': NO_REPEAT_NGRAM,
+        **({'no_repeat_ngram_size': NO_REPEAT_NGRAM} if NO_REPEAT_NGRAM > 0 else {}),
         'repetition_penalty': REPETITION_PENALTY,
         # Critical: stops a chunk's own looping output being fed back as
         # context for the next chunk, which is what lets a loop compound.
