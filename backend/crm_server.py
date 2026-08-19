@@ -23,6 +23,8 @@ UPLOAD_ROOT = Path(__file__).resolve().parent / 'uploads'
 UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
 app.mount('/media-files', StaticFiles(directory=str(UPLOAD_ROOT)), name='media-files')
 TENANT_TABLES = ['users', 'leads', 'tracking_events', 'field_reports', 'uploaded_media', 'audit_logs']
+# Must match AuditLog.entity_external_id in models.py.
+AUDIT_ENTITY_ID_LEN = 120
 
 
 def _slugify(value: str) -> str:
@@ -35,6 +37,9 @@ def _is_super_admin(user: User | None) -> bool:
 
 
 def _log_action(db: Session, *, action: str, entity_type: str, entity_external_id: str, details: str, actor: User | None, company_id: int | None = None):
+    # An audit record must never be the reason an operation fails, so the id is
+    # clamped to the column width rather than allowed to overflow and raise.
+    entity_external_id = (entity_external_id or '')[:AUDIT_ENTITY_ID_LEN]
     db.add(AuditLog(company_id=company_id if company_id is not None else (actor.company_id if actor else None), actor_user_id=actor.id if actor else None, actor_role=actor.role if actor else 'System', action=action, entity_type=entity_type, entity_external_id=entity_external_id, details=details))
 
 
@@ -145,6 +150,28 @@ def _ensure_multi_tenant_schema() -> None:
         db.commit()
 
 
+def _ensure_column_widths() -> None:
+    # SQLite declares VARCHAR lengths but does not enforce them, which is exactly
+    # why an over-long audit id passed every local test and only raised on the
+    # deployed Postgres. Widen the existing column in place; no-op elsewhere.
+    if settings.is_sqlite:
+        return
+    with engine.begin() as connection:
+        inspector = inspect(connection)
+        if 'audit_logs' not in set(inspector.get_table_names()):
+            return
+        for column in inspector.get_columns('audit_logs'):
+            if column['name'] != 'entity_external_id':
+                continue
+            length = getattr(column['type'], 'length', None)
+            if length is not None and length < AUDIT_ENTITY_ID_LEN:
+                connection.execute(text(
+                    'ALTER TABLE audit_logs ALTER COLUMN entity_external_id '
+                    f'TYPE VARCHAR({AUDIT_ENTITY_ID_LEN})'
+                ))
+            break
+
+
 def _bootstrap_admin() -> None:
     if not settings.bootstrap_admin_username or not settings.bootstrap_admin_password:
         return
@@ -182,6 +209,7 @@ def _serialize_report(db: Session, report: FieldReport) -> dict:
 def _startup():
     Base.metadata.create_all(bind=engine)
     _ensure_multi_tenant_schema()
+    _ensure_column_widths()
     _bootstrap_admin()
 
 

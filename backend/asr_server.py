@@ -49,6 +49,11 @@ SEGMENT_PAD_SECONDS = float(os.getenv('BANGLA_ASR_SEGMENT_PAD_SECONDS', '0.15'))
 SEGMENT_SPLIT_TOP_DB = int(os.getenv('BANGLA_ASR_SEGMENT_SPLIT_TOP_DB', str(DEFAULT_TOP_DB)))
 MAX_AUDIO_MB = int(os.getenv('BANGLA_ASR_MAX_AUDIO_MB', '50'))
 MAX_SYNC_SECONDS = float(os.getenv('BANGLA_ASR_MAX_SYNC_SECONDS', '45'))
+LANGUAGE = os.getenv('BANGLA_ASR_LANGUAGE', 'bn')
+NO_REPEAT_NGRAM = int(os.getenv('BANGLA_ASR_NO_REPEAT_NGRAM', '4'))
+REPETITION_PENALTY = float(os.getenv('BANGLA_ASR_REPETITION_PENALTY', '1.15'))
+CONDITION_ON_PREV = os.getenv('BANGLA_ASR_CONDITION_ON_PREV', 'false').lower() == 'true'
+_generate_kwargs_supported = True
 
 _model_lock = threading.Lock()
 _asr_pipe = None
@@ -403,11 +408,11 @@ def _transcribe_audio_file(audio_path: str, *, job_id: str | None = None) -> Tra
             completed_chunks=index - 1,
         )
         with _model_lock:
-            result = pipe(
-                {'array': segment, 'sampling_rate': sample_rate},
+            result = _run_pipeline(
+                pipe,
+                segment,
+                sample_rate,
                 chunk_length_s=max(1, min(_runtime_chunk_seconds, int(np.ceil(segment_duration)) or 1)),
-                batch_size=_runtime_batch_size,
-                return_timestamps=False,
             )
         text = _normalize_text(result.get('text') or '')
         if text:
@@ -526,6 +531,57 @@ _NUMBER_WORDS = {
 }
 
 
+def _decode_kwargs() -> dict:
+    """Whisper decoding settings that suppress runaway repetition.
+
+    Without these the decoder loops on unclear audio - long spoken digit
+    sequences are the worst case - emitting near-identical tokens that the
+    exact-match collapsers downstream cannot catch, plus partial byte
+    sequences that decode to the Unicode replacement character.
+    """
+    return {
+        # Pin the language. Left to auto-detect it can drift per chunk and
+        # degrade badly mid-utterance.
+        'language': LANGUAGE,
+        'task': 'transcribe',
+        # Hard block on repeating any n-gram: the direct fix for the loop.
+        'no_repeat_ngram_size': NO_REPEAT_NGRAM,
+        'repetition_penalty': REPETITION_PENALTY,
+        # Critical: stops a chunk's own looping output being fed back as
+        # context for the next chunk, which is what lets a loop compound.
+        'condition_on_prev_tokens': CONDITION_ON_PREV,
+    }
+
+
+def _run_pipeline(pipe, segment, sample_rate: int, *, chunk_length_s: int):
+    """Transcribe one segment, degrading gracefully if kwargs are rejected.
+
+    Model and library versions differ in which generation kwargs they accept,
+    and a rejected kwarg must not take the whole service down - so on the first
+    failure this falls back to a bare call and stops retrying.
+    """
+    global _generate_kwargs_supported
+    payload = {'array': segment, 'sampling_rate': sample_rate}
+    if _generate_kwargs_supported:
+        try:
+            return pipe(
+                payload,
+                chunk_length_s=chunk_length_s,
+                batch_size=_runtime_batch_size,
+                return_timestamps=False,
+                generate_kwargs=_decode_kwargs(),
+            )
+        except (TypeError, ValueError) as exc:
+            _generate_kwargs_supported = False
+            print(f'[asr] generation kwargs rejected, falling back: {exc}')
+    return pipe(
+        payload,
+        chunk_length_s=chunk_length_s,
+        batch_size=_runtime_batch_size,
+        return_timestamps=False,
+    )
+
+
 def _merge_chunk_texts(texts: list[str]) -> str:
     merged_tokens: list[str] = []
     for text in texts:
@@ -548,6 +604,9 @@ def _merge_chunk_texts(texts: list[str]) -> str:
 
 
 def _normalize_text(text: str) -> str:
+    # U+FFFD appears when the decoder emits a partial multi-byte sequence
+    # during a repetition loop. It is never valid output, so drop it.
+    text = text.replace(chr(0xFFFD), '')
     normalized = ' '.join(text.replace('\n', ' ').split()).strip()
     if not normalized:
         return ''

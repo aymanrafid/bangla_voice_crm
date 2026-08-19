@@ -173,7 +173,9 @@ class AuditLog(Base):
     actor_role: Mapped[str] = mapped_column(String(30), default='System')
     action: Mapped[str] = mapped_column(String(100), index=True)
     entity_type: Mapped[str] = mapped_column(String(50), index=True)
-    entity_external_id: Mapped[str] = mapped_column(String(36), default='')
+    # Wide enough for composite keys such as '<employee_uuid>:<lead_id>'.
+    # At String(36) that overflowed and Postgres raised, returning a 500.
+    entity_external_id: Mapped[str] = mapped_column(String(120), default='')
     details: Mapped[str] = mapped_column(Text, default='')
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
