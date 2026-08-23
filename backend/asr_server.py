@@ -141,12 +141,16 @@ def _device_label(device_value) -> str:
     return str(device_value)
 
 
-def _should_use_noise_reduction(is_cpu: bool) -> bool:
+def _should_use_noise_reduction(is_cpu: bool, quality: dict | None = None) -> bool:
     if NOISE_REDUCTION_MODE == 'always':
         return True
     if NOISE_REDUCTION_MODE == 'never':
         return False
-    return not is_cpu
+    if not is_cpu:
+        return True
+    # CPU used to skip denoising entirely for speed. Enable it only for
+    # recordings whose measured signal-to-noise ratio shows it will help.
+    return bool(quality and quality.get('estimated_snr_db', 99.0) < 18.0)
 
 
 def _segment_seconds() -> float:
@@ -379,7 +383,10 @@ def _transcribe_audio_file(audio_path: str, *, job_id: str | None = None) -> Tra
         stage='preprocessing',
         message='Reducing noise and trimming silence.',
     )
-    use_noise_reduction = _should_use_noise_reduction(_loaded_device == 'cpu')
+    use_noise_reduction = _should_use_noise_reduction(
+        _loaded_device == 'cpu',
+        quality,
+    )
     processed_audio, sample_rate, prep = preprocess_for_asr(
         audio_path,
         use_noise_reduction=use_noise_reduction,
@@ -622,7 +629,7 @@ def _normalize_text(text: str) -> str:
     return ' '.join(tokens).strip()
 
 
-def _collapse_repeated_tokens(tokens: list[str], *, max_repeats: int = 2) -> list[str]:
+def _collapse_repeated_tokens(tokens: list[str], *, max_repeats: int = 1) -> list[str]:
     collapsed: list[str] = []
     previous = None
     repeat_count = 0
@@ -734,6 +741,8 @@ def _debug_line(*, quality):
         f'device={_loaded_device}; '
         f'duration={quality["duration"]:.2f}s; '
         f'rms={quality["rms"]:.4f}; '
+        f'snr_db={quality["estimated_snr_db"]:.1f}; '
+        f'clipping={quality["clipping_ratio"]:.3f}; '
         f'is_too_short={quality["is_too_short"]}; '
         f'is_silent={quality["is_silent"]}; '
         f'chunk_seconds={_runtime_chunk_seconds}; '

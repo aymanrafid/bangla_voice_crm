@@ -68,6 +68,11 @@ class AuthService extends ChangeNotifier {
               accessToken: token,
             );
             _currentUser = await _syncRemoteUserToLocal(remoteUser);
+            // Stamp (never wipe) the restored session's tenant. Without this an
+            // install upgrading to this version has an empty marker, so the
+            // first cross-company login would compare against nothing and let
+            // the previous tenant's rows through once.
+            await _config.saveLastCompanyKey(_companyKeyFor(_currentUser!));
             await _config.saveSessionMode('remote');
             await _config
                 .saveSessionUserJson(jsonEncode(_currentUser!.toMap()));
@@ -149,6 +154,8 @@ class AuthService extends ChangeNotifier {
           password: password,
           companySlug: companySlug,
         );
+        // Runs before the new user is cached, so the wipe cannot remove it.
+        await _enforceTenantBoundary(session.user);
         _currentUser = await _syncRemoteUserToLocal(session.user);
         await _config.saveAccessToken(session.accessToken);
         await _config.saveSessionMode('remote');
@@ -278,6 +285,31 @@ class AuthService extends ChangeNotifier {
       notifyListeners();
       return null;
     }
+  }
+
+  /// Identifies the tenant that the cached SQLite rows belong to.
+  String _companyKeyFor(AppUser user) {
+    if (user.companyExternalId.isNotEmpty) return user.companyExternalId;
+    if (user.companySlug.isNotEmpty) return user.companySlug;
+    return _remoteMode ? 'remote-unscoped' : 'local';
+  }
+
+  /// Drops the local cache when a different company signs in on this device.
+  ///
+  /// The local database has no company column, so without this the previous
+  /// tenant's leads, meetings and staff stay visible to the next account that
+  /// logs in here. Server-side scoping is unaffected — this closes the gap on
+  /// the client, where a shared handset is the realistic case.
+  ///
+  /// Only a genuine change wipes: the same admin signing back in keeps their
+  /// meetings, which exist nowhere but this device.
+  Future<void> _enforceTenantBoundary(AppUser user) async {
+    final incoming = _companyKeyFor(user);
+    final previous = await _config.getLastCompanyKey();
+    if (previous.isNotEmpty && previous != incoming) {
+      await _db.clearTenantData();
+    }
+    await _config.saveLastCompanyKey(incoming);
   }
 
   Future<void> _retryQueuedReports() async {

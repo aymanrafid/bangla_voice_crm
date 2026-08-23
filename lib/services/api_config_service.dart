@@ -5,6 +5,8 @@ class ApiConfigService {
   static const _crmApiBaseUrlKey = 'crm_api_base_url';
   static const _asrApiUrlKey = 'asr_api_url';
   static const _companySlugKey = 'crm_company_slug';
+  // Identifies which tenant the cached SQLite rows belong to.
+  static const _lastCompanyKey = 'crm_last_company_key';
   static const _accessTokenKey = 'crm_access_token';
   static const _sessionModeKey = 'crm_session_mode';
   static const _sessionUserJsonKey = 'crm_session_user_json';
@@ -38,6 +40,16 @@ class ApiConfigService {
   Future<void> saveCompanySlug(String value) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_companySlugKey, value.trim());
+  }
+
+  Future<String> getLastCompanyKey() async {
+    final prefs = await SharedPreferences.getInstance();
+    return (prefs.getString(_lastCompanyKey) ?? '').trim();
+  }
+
+  Future<void> saveLastCompanyKey(String value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_lastCompanyKey, value.trim());
   }
 
   Future<void> saveAccessToken(String token) async {

@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:async';
 
 import 'package:file_picker/file_picker.dart';
@@ -79,7 +80,20 @@ class _VoiceInputScreenState extends State<VoiceInputScreen> {
       dir.path,
       'rec_${DateTime.now().millisecondsSinceEpoch}.m4a',
     );
-    await _channel.invokeMethod('startRecording', {'path': _recordingPath});
+    try {
+      await _channel.invokeMethod('startRecording', {'path': _recordingPath});
+    } catch (exc) {
+      // Without this the failure surfaced as an unhandled async error: the
+      // button did nothing and _recordingPath still pointed at a file that was
+      // never created.
+      if (!mounted) return;
+      setState(() {
+        _isRecording = false;
+        _recordingPath = null;
+        _errorMsg = 'Could not start recording: $exc';
+      });
+      return;
+    }
     _recordDuration = Duration.zero;
     _recordTimer?.cancel();
     _recordTimer = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -94,11 +108,38 @@ class _VoiceInputScreenState extends State<VoiceInputScreen> {
 
   Future<void> _stopRecording() async {
     _recordTimer?.cancel();
-    await _channel.invokeMethod('stopRecording');
-    setState(() => _isRecording = false);
-    if (_recordingPath != null) {
-      await _processAudio(_recordingPath!);
+    final recordedPath = _recordingPath;
+    try {
+      await _channel.invokeMethod('stopRecording');
+    } catch (exc) {
+      // The native side deletes the unusable file and reports here. Clear the
+      // path so a later action cannot pick up a stale recording.
+      if (!mounted) return;
+      setState(() {
+        _isRecording = false;
+        _recordingPath = null;
+        _errorMsg = 'Recording failed: $exc. Please hold the button and speak '
+            'for at least 2 seconds.';
+      });
+      return;
     }
+    if (!mounted) return;
+    setState(() => _isRecording = false);
+    if (recordedPath == null) return;
+
+    // Never transcribe a file the recorder did not actually produce - that is
+    // how an earlier recording's audio ends up attached to a new capture.
+    final file = File(recordedPath);
+    if (!await file.exists() || await file.length() < 1024) {
+      if (!mounted) return;
+      setState(() {
+        _recordingPath = null;
+        _errorMsg = 'No audio was captured. Please record again and speak for '
+            'at least 2 seconds.';
+      });
+      return;
+    }
+    await _processAudio(recordedPath);
   }
 
   Future<void> _pickAudioFile() async {

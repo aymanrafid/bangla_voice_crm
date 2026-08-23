@@ -715,6 +715,36 @@ class DatabaseService {
     return Meeting.fromMap(maps.first);
   }
 
+  /// Tables holding tenant data. Order matters: children before parents so
+  /// foreign keys never block a delete.
+  static const List<String> _tenantTables = [
+    'report_images',
+    'gps_logs',
+    'app_alerts',
+    'lead_update_history',
+    'field_visits',
+    'field_reports',
+    'meetings',
+    'leads',
+    'users',
+  ];
+
+  /// Wipes every cached row on this device.
+  ///
+  /// The local database is a cache with no company column, so when a different
+  /// company's account signs in on the same device the previous tenant's rows
+  /// would otherwise still be visible. The server is authoritative for anything
+  /// carrying an external_id, so this only discards a cache — except meetings,
+  /// which exist nowhere else and are genuinely device-local.
+  Future<void> clearTenantData() async {
+    final db = await database;
+    await db.transaction((txn) async {
+      for (final table in _tenantTables) {
+        await txn.delete(table);
+      }
+    });
+  }
+
   Future<void> updateMeetingStatus(int id, String status) async {
     final db = await database;
     await db.update('meetings', {'status': status},

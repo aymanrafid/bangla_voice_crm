@@ -113,10 +113,25 @@ class _FieldReportSubmissionScreenState
     try {
       _recordTimer?.cancel();
       await _channel.invokeMethod('stopRecording');
+      if (!mounted) return;
       setState(() => _isRecording = false);
-      if (_recordingPath != null) {
-        await _transcribeVoice(_recordingPath!);
+      final recordedPath = _recordingPath;
+      if (recordedPath == null) return;
+      // Guard against transcribing a file the recorder never produced, which is
+      // how a stale recording gets attached to a new report.
+      final file = File(recordedPath);
+      if (!await file.exists() || await file.length() < 1024) {
+        if (!mounted) return;
+        setState(() {
+          _recordingPath = null;
+          _voicePath = '';
+          _transcript = '';
+          _error = 'No audio was captured. Please record again and speak for '
+              'at least 2 seconds.';
+        });
+        return;
       }
+      await _transcribeVoice(recordedPath);
     } catch (exc) {
       if (!mounted) return;
       setState(() {
